@@ -8,12 +8,15 @@ necesita consultar "¿a qué hora llega?" sin abrir tres apps distintas.
 
 ## Características
 
-- Tres paneles (Chamartín, Atocha, Barajas) con horario previsto, origen,
-  vía/terminal y estado (en hora / retraso en minutos / cancelado /
-  llegado).
-- Datos en vivo, con auto-refresco cada 60 s. En Chamartín y Atocha,
-  además de los próximos trenes (lo único que da el panel oficial),
-  conserva localmente los que ya han llegado en los últimos 30 minutos.
+- Tres paneles (Chamartín, Atocha, Barajas) con horario previsto, hora
+  estimada real si hay retraso, origen, vía/terminal y estado (en hora /
+  retraso en minutos / cancelado / llegado).
+- Datos en vivo. Sin refresco automático de fondo (para no gastar batería
+  ni datos sin que nadie mire): pide datos frescos al entrar en una
+  pestaña o al pulsar ⟳ (hay uno junto al reloj y otro en cada panel).
+  En Chamartín y Atocha, además de los próximos trenes (lo único que da
+  el panel oficial), conserva localmente los que ya han llegado en los
+  últimos 30 minutos.
 - Buscador por número de tren/vuelo.
 - Favoritos (⭐), persistentes entre sesiones.
 - Instalable como app ("Añadir a pantalla de inicio") gracias a un
@@ -42,8 +45,8 @@ que:
 - Cachea la respuesta ~5 minutos en Workers KV (caché **global**, no por
   centro de datos — con la Cache API normal de Workers, peticiones
   seguidas podían caer en colos distintos y no acertar), así que aunque
-  la app refresque cada 60 s, la clave gratuita (~600 peticiones/mes) no
-  se agota aunque alguien deje la pestaña abierta.
+  varias personas pulsen ⟳ a la vez, la clave gratuita (~600
+  peticiones/mes) no se agota.
 
 Sin el proxy disponible, el panel de Barajas cae a datos de ejemplo con
 un aviso visible de "modo demostración" — nunca oculta que son datos

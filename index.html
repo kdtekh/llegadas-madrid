@@ -45,8 +45,8 @@
     font-family:'Space Mono',monospace;font-weight:700;font-size:15px;letter-spacing:.14em;
     text-transform:uppercase;color:var(--flap);margin:0;
   }
+  .brand-right{display:flex;align-items:center;gap:10px;}
   .brand .clock{font-family:'Space Mono',monospace;font-size:16px;color:var(--ink-dim);}
-  .subtitle{font-size:13px;color:var(--ink-dim);margin-top:4px;letter-spacing:.03em;}
 
   /* ---------- Station tabs (content) ---------- */
   .station-head{padding:4px 16px 14px;}
@@ -54,10 +54,6 @@
     font-family:'Archivo',sans-serif;font-weight:900;font-size:32px;margin:0 0 4px;
     letter-spacing:-.01em;
   }
-  .station-head .meta{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--ink-dim);}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;}
-  .dot.stale{background:var(--warn);}
-  .dot.err{background:var(--bad);}
 
   .toolbar{display:flex;gap:8px;padding:0 16px 14px;}
   .toolbar input[type=search]{
@@ -70,6 +66,7 @@
     width:48px;border-radius:var(--radius);font-size:19px;cursor:pointer;
   }
   .iconbtn:active{background:var(--panel-raised);}
+  .iconbtn.small{width:30px;height:30px;font-size:16px;line-height:1;padding:0;}
 
   /* ---------- Board ---------- */
   .board{padding:0 16px;}
@@ -149,9 +146,11 @@
 <header class="top">
   <div class="brand">
     <h1 id="stationTitleMini">Llegadas Madrid</h1>
-    <span class="clock mono" id="clock">--:--</span>
+    <div class="brand-right">
+      <span class="clock mono" id="clock">--:--</span>
+      <button class="iconbtn small" id="btnRefreshHeader" aria-label="Actualizar">⟳</button>
+    </div>
   </div>
-  <div class="subtitle">Tren + vuelo en un solo panel</div>
 </header>
 
 <main id="view"></main>
@@ -180,12 +179,10 @@ function TREN_ENDPOINT(codigo){
   return `https://radardetrenes.com/api/v1/stations/${codigo}/board-renfe`;
 }
 // Vuelos: proxy propio (Cloudflare Worker) que guarda la clave de
-// AeroDataBox del lado del servidor y cachea la respuesta ~5 min en una
-// KV global (no por centro de datos), para que la app pueda refrescar
-// cada 60s sin agotar la cuota gratuita ni pedirle una clave a quien
-// use la app.
+// AeroDataBox del lado del servidor, calcula la ventana en hora local de
+// Madrid y cachea la respuesta ~5 min en una KV global — sin pedirle
+// ninguna clave a quien use la app.
 const VUELO_PROXY_ENDPOINT = 'https://llegadas-madrid-proxy.kdtekh.workers.dev/arrivals';
-const REFRESH_MS = 60000;
 
 /* ========================= estado y almacenamiento ===================== */
 // Persistencia con localStorage: esto es una PWA real servida desde un
@@ -293,10 +290,14 @@ function normalizaTren(x){
     ? new Date(x.plannedTime).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})
     : '--:--';
   const retraso = x.delayMinutes || 0;
+  const estimadoHora = retraso > 0 && x.plannedTime
+    ? new Date(x.plannedTime + retraso*60000).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})
+    : null;
   return {
     id: `${x.trainCode}_${hora}`,
     plannedTimeMs: x.plannedTime,
     hora,
+    estimadoHora,
     origen: x.originName || '—',
     num: x.trainCode || '',
     via: x.platform || x.commercialProduct || x.product || '—',
@@ -334,8 +335,10 @@ function normalizaVuelo(f){
     retraso = Math.round((new Date(revisedLocal.replace(' ','T')) - new Date(schedLocal.replace(' ','T'))) / 60000);
   }
   const cancelado = f.status === 'Cancelled' || f.status === 'Canceled';
+  const estimadoHora = retraso > 0 && revisedLocal ? revisedLocal.slice(11,16) : null;
   return {
     hora,
+    estimadoHora,
     origen: f.departure?.airport?.name || '—',
     num: f.number || '',
     via: f.arrival?.terminal || '—',
@@ -370,7 +373,6 @@ function renderBoard(tab, nombre, rows, isDemo){
   view.innerHTML = `
     <div class="station-head">
       <h2>${nombre}</h2>
-      <div class="meta"><span class="dot ${isDemo?'stale':''}"></span>${isDemo ? 'Modo demostración' : 'Datos en vivo'} · se actualiza cada 60 s</div>
     </div>
     <div class="toolbar">
       <input type="search" id="buscador" placeholder="Buscar nº de tren o vuelo..." value="${filtro}">
@@ -390,7 +392,7 @@ function renderBoard(tab, nombre, rows, isDemo){
     const div = document.createElement('div');
     div.className = 'row' + (isFav ? ' fav' : '') + (r.llegado ? ' llegado' : '');
     div.innerHTML = `
-      <div class="time mono">${r.hora}</div>
+      <div class="time mono">${r.hora}${r.estimadoHora ? `<small>→ ${r.estimadoHora}</small>` : ''}</div>
       <div class="origin">${r.origen}<span class="num">${r.num}</span></div>
       <div class="plat">${r.via}</div>
       <div class="status ${statusClass(r)}">${statusLabel(r)}</div>
@@ -452,7 +454,7 @@ async function renderCurrent(forceReload){
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     state.tab = btn.dataset.tab;
-    renderCurrent(false);
+    renderCurrent(true);
   });
 });
 
@@ -462,12 +464,14 @@ function tickClock(){
     d.toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
 }
 
+// Sin refresco automático de fondo: cada pestaña pide datos frescos al
+// entrar en ella (o al pulsar ⟳), no cada 60s esté alguien mirando o no.
 (async function init(){
   loadPersisted();
   tickClock();
   setInterval(tickClock, 15000);
+  document.getElementById('btnRefreshHeader').addEventListener('click', ()=> renderCurrent(true));
   await renderCurrent(true);
-  setInterval(()=> renderCurrent(true), REFRESH_MS);
 })();
 
 if('serviceWorker' in navigator){
