@@ -371,9 +371,6 @@ function renderBoard(tab, nombre, rows, isDemo){
   const filtradas = filtro ? rows.filter(r => (r.num||'').toUpperCase().includes(filtro) || (r.origen||'').toUpperCase().includes(filtro)) : rows;
 
   view.innerHTML = `
-    <div class="station-head">
-      <h2>${nombre}</h2>
-    </div>
     <div class="toolbar">
       <input type="search" id="buscador" placeholder="Buscar nº de tren o vuelo..." value="${filtro}">
       <button class="iconbtn" id="btnRefresh">⟳</button>
