@@ -294,17 +294,22 @@ async function fetchVuelos(){
   }
 }
 function normalizaVuelo(f){
-  const prog = f.arrival?.scheduledTime?.local?.slice(11,16) || '--:--';
-  const est = f.arrival?.predictedTime?.local?.slice(11,16);
-  const retraso = (est && est !== prog) ? 1 : 0;
+  const schedLocal = f.arrival?.scheduledTime?.local;
+  const revisedLocal = f.arrival?.revisedTime?.local;
+  const hora = schedLocal ? schedLocal.slice(11,16) : '--:--';
+  let retraso = 0;
+  if(schedLocal && revisedLocal && revisedLocal !== schedLocal){
+    retraso = Math.round((new Date(revisedLocal.replace(' ','T')) - new Date(schedLocal.replace(' ','T'))) / 60000);
+  }
+  const cancelado = f.status === 'Cancelled' || f.status === 'Canceled';
   return {
-    hora: prog,
+    hora,
     origen: f.departure?.airport?.name || '—',
     num: f.number || '',
     via: f.arrival?.terminal || '—',
-    estado: f.status === 'Cancelled' ? 'bad' : (retraso ? 'warn' : 'ok'),
-    retraso: 0,
-    cancelado: f.status === 'Cancelled',
+    estado: cancelado ? 'bad' : ((retraso > 5 || f.status === 'Delayed') ? 'warn' : 'ok'),
+    retraso: retraso > 0 ? retraso : 0,
+    cancelado,
   };
 }
 

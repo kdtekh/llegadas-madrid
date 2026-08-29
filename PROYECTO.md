@@ -62,10 +62,18 @@ construida, probada y funcionando con datos en vivo.
 - ICAO de Barajas: `LEMD`
 - Clave gratuita (~600 peticiones/mes):
   `https://rapidapi.com/aedbx-aedbx/api/aerodatabox`
-- **No verificado en vivo** (necesita una clave que no tenemos en el
-  entorno de desarrollo) — el parseo sigue el esquema documentado de
-  AeroDataBox; si al probarlo con una clave real algo no encaja, es el
-  primer sitio donde mirar.
+- **Verificado en vivo (2026-08-29)** con la cuenta RapidAPI ya suscrita
+  al plan BASIC (gratis) del usuario, contra `/flights/airports/icao/LEMD/...`
+  — 200 OK, cientos de llegadas reales. El esquema documentado difería en
+  un punto: no existe `arrival.predictedTime`, el campo real es
+  `arrival.revisedTime`. `normalizaVuelo()` en `index.html` ya está
+  corregido para usarlo y calcular los minutos de retraso a partir de la
+  diferencia `revisedTime - scheduledTime`. Estados observados en vivo:
+  `Arrived`, `Expected`, `Approaching`, `Delayed` (no se observó ningún
+  vuelo cancelado en la ventana probada; se comprueban ambas grafías
+  `Cancelled`/`Canceled` por si acaso). Nunca se imprimió la clave real en
+  el chat ni se guardó en ningún archivo — se usó y se descartó solo
+  dentro del navegador (regla del `CLAUDE.md` del vault).
 
 ## 4. Lo que le pido a Claude Code
 
@@ -83,10 +91,10 @@ construida, probada y funcionando con datos en vivo.
    fallback a caché para RadarDeTrenes y AeroDataBox). Verificado:
    `caches.keys()` muestra `llegadas-madrid-v1-shell` y `-api` pobladas
    tras cargar la app.
-4. **Pendiente** — Verificar en vivo el endpoint de AeroDataBox en cuanto
-   haya una clave de prueba real; ajustar `normalizaVuelo()` si el esquema
-   difiere. Con una clave inválida el fallback a modo demo funciona
-   correctamente (probado).
+4. ~~Verifica en vivo el endpoint de AeroDataBox~~ **Hecho** (2026-08-29,
+   ver sección 3) — `normalizaVuelo()` corregido para el esquema real
+   (`revisedTime` en vez de `predictedTime`). Con una clave inválida el
+   fallback a modo demo también funciona correctamente (probado).
 5. **Pendiente, a petición del usuario** — Por ahora se deja el código
    listo sin desplegar; el usuario decidirá cuándo y dónde (GitHub Pages,
    Netlify, Vercel, Cloudflare Pages) para tener una URL fija.
