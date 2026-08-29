@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'llegadas-madrid-v9';
+const CACHE_VERSION = 'llegadas-madrid-v10';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 
@@ -13,16 +13,17 @@ const SHELL_ASSETS = [
 const API_HOSTS = ['radardetrenes.com', 'llegadas-madrid-proxy.kdtekh.workers.dev'];
 
 self.addEventListener('install', (event) => {
-  // fetch con {cache:'reload'} en vez de cache.addAll(): GitHub Pages sirve
-  // index.html con Cache-Control: max-age=600, y cache.addAll respeta esa
-  // caché HTTP del navegador — al instalar una versión nueva del shell,
+  // Request con {cache:'reload'} en vez de URLs planas: GitHub Pages sirve
+  // index.html con Cache-Control: max-age=600, y cache.addAll(URLs) respeta
+  // esa caché HTTP del navegador — al instalar una versión nueva del shell,
   // podía quedarse con una copia de index.html ya desactualizada.
+  // cache.addAll sigue siendo todo-o-nada: si algún asset responde con un
+  // error, la instalación entera falla y se mantiene el service worker
+  // anterior en vez de cachear una respuesta rota como si fuera válida.
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => Promise.all(
-        SHELL_ASSETS.map((url) =>
-          fetch(url, { cache: 'reload' }).then((response) => cache.put(url, response))
-        )
+      .then((cache) => cache.addAll(
+        SHELL_ASSETS.map((url) => new Request(url, { cache: 'reload' }))
       ))
       .then(() => self.skipWaiting())
   );

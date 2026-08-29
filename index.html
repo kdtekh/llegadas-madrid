@@ -172,8 +172,8 @@
    {departures, arrivals, updatedAt, source, mode}.
    ========================================================================= */
 const STATIONS = {
-  chamartin: { nombre: 'Chamartín — Clara Campoamor', codigo: '17000' },
-  atocha:    { nombre: 'Puerta de Atocha — Almudena Grandes', codigo: '60000' },
+  chamartin: { corto: 'Chamartín', codigo: '17000' },
+  atocha:    { corto: 'Atocha', codigo: '60000' },
 };
 function TREN_ENDPOINT(codigo){
   return `https://radardetrenes.com/api/v1/stations/${codigo}/board-renfe`;
@@ -214,15 +214,15 @@ function mergeConHistorial(key, vivos){
   });
 
   Object.keys(historial).forEach(id=>{
+    // Si el panel en vivo lo sigue mostrando, se queda, sin importar cuánto
+    // retraso lleve acumulado sobre su hora prevista original (un tren con
+    // 40 min de retraso pero aún en circulación no debe desaparecer solo
+    // por llevar más de HISTORY_WINDOW_MS "de retraso" respecto a esa hora).
+    if(vistosAhora.has(id)) return;
     const item = historial[id];
-    if(now - item.plannedTimeMs > HISTORY_WINDOW_MS){
-      delete historial[id];
-      return;
-    }
-    if(!vistosAhora.has(id)){
-      if(item.plannedTimeMs <= now) item.llegado = true;
-      else delete historial[id]; // salió del panel antes de su hora: no especulamos
-    }
+    const dentroDeLaVentana = item.plannedTimeMs <= now && now - item.plannedTimeMs <= HISTORY_WINDOW_MS;
+    if(dentroDeLaVentana) item.llegado = true;
+    else delete historial[id]; // o salió antes de su hora (no especulamos) o ya pasaron los 30 min
   });
 
   saveHistory(key, historial);
@@ -285,13 +285,18 @@ async function fetchTrenes(key){
     return demoTrenes(st.codigo);
   }
 }
+// Siempre en hora de Madrid (Europe/Madrid), no la del dispositivo: si se
+// abre la app desde un móvil con otra zona horaria configurada, las horas
+// de trenes de Madrid no deben cambiar según dónde esté físicamente el
+// dueño del teléfono.
+const MADRID_TZ = { hour:'2-digit', minute:'2-digit', timeZone:'Europe/Madrid' };
 function normalizaTren(x){
   const hora = x.plannedTime
-    ? new Date(x.plannedTime).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})
+    ? new Date(x.plannedTime).toLocaleTimeString('es-ES', MADRID_TZ)
     : '--:--';
   const retraso = x.delayMinutes || 0;
   const estimadoHora = retraso > 0 && x.plannedTime
-    ? new Date(x.plannedTime + retraso*60000).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})
+    ? new Date(x.plannedTime + retraso*60000).toLocaleTimeString('es-ES', MADRID_TZ)
     : null;
   return {
     id: `${x.trainCode}_${hora}`,
@@ -365,44 +370,62 @@ function statusClass(r){
 }
 function favKeyOf(tab, r){ return tab+'|'+r.num+'|'+r.hora; }
 
-function renderBoard(tab, nombre, rows, isDemo){
-  titleMini.textContent = nombre.split(' — ')[0].split('-')[0];
-  const filtro = (document.getElementById('buscador')?.value || '').trim().toUpperCase();
-  const filtradas = filtro ? rows.filter(r => (r.num||'').toUpperCase().includes(filtro) || (r.origen||'').toUpperCase().includes(filtro)) : rows;
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderBoard(tab, corto, rows, isDemo){
+  titleMini.textContent = corto;
 
   view.innerHTML = `
     <div class="toolbar">
-      <input type="search" id="buscador" placeholder="Buscar nº de tren o vuelo..." value="${filtro}">
+      <input type="search" id="buscador" placeholder="Buscar nº de tren o vuelo...">
       <button class="iconbtn" id="btnRefresh">⟳</button>
     </div>
     ${isDemo ? `<div class="demo-note"><b>Sin conexión a datos reales ahora mismo.</b> Estás viendo horarios de ejemplo. ${tab==='barajas' ? 'El servicio de vuelos no responde en este momento — se reintenta cada 60 s automáticamente.' : 'RadarDeTrenes puede tardar un momento en responder o no tener cobertura puntual — se reintenta cada 60 s automáticamente.'}</div>` : ''}
     <div class="board">
       <div class="board-header-row"><span>Hora</span><span>Origen</span><span style="text-align:center">Vía</span><span style="text-align:right">Estado</span><span></span></div>
       <div id="rows"></div>
-      ${filtradas.length === 0 ? '<div class="empty">Sin resultados para esa búsqueda.</div>' : ''}
     </div>
   `;
-  const rowsEl = document.getElementById('rows');
-  filtradas.forEach(r=>{
-    const fk = favKeyOf(tab, r);
-    const isFav = !!state.favoritos[fk];
-    const div = document.createElement('div');
-    div.className = 'row' + (isFav ? ' fav' : '') + (r.llegado ? ' llegado' : '');
-    div.innerHTML = `
-      <div class="time mono">${r.hora}${r.estimadoHora ? `<small>→ ${r.estimadoHora}</small>` : ''}</div>
-      <div class="origin">${r.origen}<span class="num">${r.num}</span></div>
-      <div class="plat">${r.via}</div>
-      <div class="status ${statusClass(r)}">${statusLabel(r)}</div>
-      <button class="star ${isFav?'on':''}" aria-label="favorito">★</button>
-    `;
-    div.querySelector('.star').addEventListener('click', ()=>{
-      if(state.favoritos[fk]) delete state.favoritos[fk]; else state.favoritos[fk] = true;
-      saveFavoritos();
-      renderCurrent();
+
+  // Repinta solo las filas (no todo el panel) en cada tecla del buscador o
+  // cambio de favorito: si se regenerase el <input> entero, perdería el
+  // foco en cada pulsación y sería inutilizable para escribir.
+  function pintarFilas(){
+    const filtro = document.getElementById('buscador').value.trim().toUpperCase();
+    const filtradas = filtro
+      ? rows.filter(r => (r.num||'').toUpperCase().includes(filtro) || (r.origen||'').toUpperCase().includes(filtro))
+      : rows;
+    const rowsEl = document.getElementById('rows');
+    rowsEl.innerHTML = '';
+    if(filtradas.length === 0){
+      rowsEl.innerHTML = '<div class="empty">Sin resultados para esa búsqueda.</div>';
+      return;
+    }
+    filtradas.forEach(r=>{
+      const fk = favKeyOf(tab, r);
+      const isFav = !!state.favoritos[fk];
+      const div = document.createElement('div');
+      div.className = 'row' + (isFav ? ' fav' : '') + (r.llegado ? ' llegado' : '');
+      div.innerHTML = `
+        <div class="time mono">${r.hora}${r.estimadoHora ? `<small>→ ${r.estimadoHora}</small>` : ''}</div>
+        <div class="origin">${escapeHtml(r.origen)}<span class="num">${escapeHtml(r.num)}</span></div>
+        <div class="plat">${escapeHtml(r.via)}</div>
+        <div class="status ${statusClass(r)}">${statusLabel(r)}</div>
+        <button class="star ${isFav?'on':''}" aria-label="favorito">★</button>
+      `;
+      div.querySelector('.star').addEventListener('click', ()=>{
+        if(state.favoritos[fk]) delete state.favoritos[fk]; else state.favoritos[fk] = true;
+        saveFavoritos();
+        pintarFilas();
+      });
+      rowsEl.appendChild(div);
     });
-    rowsEl.appendChild(div);
-  });
-  document.getElementById('buscador').addEventListener('input', ()=> renderCurrent(false));
+  }
+
+  pintarFilas();
+  document.getElementById('buscador').addEventListener('input', pintarFilas);
   document.getElementById('btnRefresh').addEventListener('click', ()=> renderCurrent(true));
 }
 
@@ -441,10 +464,14 @@ async function renderCurrent(forceReload){
 
   if(tab === 'barajas'){
     if(forceReload || !cache.barajas) cache.barajas = await fetchVuelos();
-    renderBoard('barajas', 'Adolfo Suárez Madrid-Barajas', cache.barajas, state.flightsDemo);
+    // Si el usuario cambió de pestaña mientras esperábamos la respuesta,
+    // no pintes estos datos encima de la pestaña que ahora está activa.
+    if(state.tab !== tab) return;
+    renderBoard('barajas', 'Barajas', cache.barajas, state.flightsDemo);
   } else {
     if(forceReload || !cache[tab]) cache[tab] = await fetchTrenes(tab);
-    renderBoard(tab, STATIONS[tab].nombre, cache[tab], state.trainsDemo);
+    if(state.tab !== tab) return;
+    renderBoard(tab, STATIONS[tab].corto, cache[tab], state.trainsDemo);
   }
 }
 
@@ -457,8 +484,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
 
 function tickClock(){
   const d = new Date();
-  document.getElementById('clock').textContent =
-    d.toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('clock').textContent = d.toLocaleTimeString('es-ES', MADRID_TZ);
 }
 
 // Sin refresco automático de fondo: cada pestaña pide datos frescos al
