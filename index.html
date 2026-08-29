@@ -177,37 +177,28 @@ const STATIONS = {
 function TREN_ENDPOINT(codigo){
   return `https://radardetrenes.com/api/v1/stations/${codigo}/board-renfe`;
 }
-// AeroDataBox (RapidAPI) — API documentada y estable para vuelos.
-// Clave gratuita en https://rapidapi.com/aedbx-aedbx/api/aerodatabox
-const BARAJAS_ICAO = 'LEMD';
-function VUELO_ENDPOINT(icao, fromISO, toISO){
-  return `https://aerodatabox.p.rapidapi.com/flights/airports/icao/${icao}/${fromISO}/${toISO}?direction=Arrival&withLeg=true&withCancelled=true&withCodeshared=true&withLocation=false`;
-}
+// Vuelos: proxy propio (Cloudflare Worker) que guarda la clave de
+// AeroDataBox del lado del servidor y cachea la respuesta ~3 min, para
+// que la app pueda refrescar cada 60s sin agotar la cuota gratuita ni
+// pedirle una clave a quien use la app.
+const VUELO_PROXY_ENDPOINT = 'https://llegadas-madrid-proxy.kdtekh.workers.dev/arrivals';
 const REFRESH_MS = 60000;
 
 /* ========================= estado y almacenamiento ===================== */
 // Persistencia con localStorage: esto es una PWA real servida desde un
 // dominio propio, no un artefacto de Claude.ai (donde no está disponible).
 const LS_KEY_FAVORITOS = 'llegadas-madrid:favoritos';
-const LS_KEY_FLIGHTKEY = 'llegadas-madrid:flight-api-key';
 
-let state = { tab:'chamartin', favoritos:{}, flightKey:'', trainsDemo:false, flightsDemo:true };
+let state = { tab:'chamartin', favoritos:{}, trainsDemo:false, flightsDemo:true };
 
 function loadPersisted(){
   try{
     const fav = localStorage.getItem(LS_KEY_FAVORITOS);
     if(fav) state.favoritos = JSON.parse(fav);
   }catch(e){}
-  try{
-    const key = localStorage.getItem(LS_KEY_FLIGHTKEY);
-    if(key) state.flightKey = key;
-  }catch(e){}
 }
 function saveFavoritos(){
   try{ localStorage.setItem(LS_KEY_FAVORITOS, JSON.stringify(state.favoritos)); }catch(e){}
-}
-function saveFlightKey(k){
-  try{ localStorage.setItem(LS_KEY_FLIGHTKEY, k); state.flightKey = k; }catch(e){}
 }
 
 /* ================================ datos ================================= */
@@ -270,24 +261,9 @@ function normalizaTren(x){
     cancelado: false,
   };
 }
-function pad2(n){ return String(n).padStart(2,'0'); }
-function toLocalISOMinute(d){
-  // AeroDataBox espera fromLocal/toLocal en hora LOCAL del aeropuerto (Madrid),
-  // no en UTC — toISOString() da UTC y desplaza la ventana ~2h (offset CET/CEST).
-  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
 async function fetchVuelos(){
-  if(!state.flightKey){ state.flightsDemo = true; return demoVuelos(); }
   try{
-    const now = new Date();
-    const from = toLocalISOMinute(now);
-    const to = toLocalISOMinute(new Date(now.getTime()+4*3600*1000));
-    const res = await fetch(VUELO_ENDPOINT(BARAJAS_ICAO, from, to), {
-      headers:{
-        'X-RapidAPI-Key': state.flightKey,
-        'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com',
-      }
-    });
+    const res = await fetch(VUELO_PROXY_ENDPOINT);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     const lista = data.arrivals || [];
@@ -349,7 +325,7 @@ function renderBoard(tab, nombre, rows, isDemo){
       <input type="search" id="buscador" placeholder="Buscar nº de tren o vuelo..." value="${filtro}">
       <button class="iconbtn" id="btnRefresh">⟳</button>
     </div>
-    ${isDemo ? `<div class="demo-note"><b>Sin conexión a datos reales ahora mismo.</b> Estás viendo horarios de ejemplo. ${tab==='barajas' ? 'Añade tu clave de AeroDataBox en Ajustes para ver vuelos reales.' : 'RadarDeTrenes puede tardar un momento en responder o no tener cobertura puntual — se reintenta cada 60 s automáticamente.'}</div>` : ''}
+    ${isDemo ? `<div class="demo-note"><b>Sin conexión a datos reales ahora mismo.</b> Estás viendo horarios de ejemplo. ${tab==='barajas' ? 'El servicio de vuelos no responde en este momento — se reintenta cada 60 s automáticamente.' : 'RadarDeTrenes puede tardar un momento en responder o no tener cobertura puntual — se reintenta cada 60 s automáticamente.'}</div>` : ''}
     <div class="board">
       <div class="board-header-row"><span>Hora</span><span>Origen</span><span style="text-align:center">Vía</span><span style="text-align:right">Estado</span><span></span></div>
       <div id="rows"></div>
@@ -387,13 +363,7 @@ function renderSettings(){
       <div class="station-head" style="padding-left:0;padding-right:0;">
         <h2 style="font-size:24px;">Ajustes</h2>
       </div>
-      <div class="field">
-        <label>Clave AeroDataBox (RapidAPI) — para vuelos reales de Barajas</label>
-        <input type="text" id="flightKeyInput" placeholder="Pega aquí tu clave" value="${state.flightKey || ''}">
-        <div class="hint">Gratis (~600 peticiones/mes) en <a href="https://rapidapi.com/aedbx-aedbx/api/aerodatabox" target="_blank">rapidapi.com/aedbx-aedbx/api/aerodatabox</a>. Sin clave, el panel de Barajas muestra horarios de ejemplo.</div>
-      </div>
       <div class="savebar">
-        <button class="btn" id="btnGuardar">Guardar</button>
         <button class="btn ghost" id="btnBorrarFav">Borrar favoritos</button>
       </div>
       <div class="savedflag" id="savedFlag"></div>
@@ -403,12 +373,6 @@ function renderSettings(){
       </div>
     </div>
   `;
-  document.getElementById('btnGuardar').addEventListener('click', ()=>{
-    const v = document.getElementById('flightKeyInput').value.trim();
-    saveFlightKey(v);
-    document.getElementById('savedFlag').textContent = 'Guardado.';
-    setTimeout(()=> document.getElementById('savedFlag').textContent = '', 2000);
-  });
   document.getElementById('btnBorrarFav').addEventListener('click', ()=>{
     state.favoritos = {};
     saveFavoritos();

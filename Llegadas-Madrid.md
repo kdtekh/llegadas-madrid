@@ -26,16 +26,32 @@ API pública y gratuita sobre datos abiertos de Renfe/Adif (**CC BY 4.0**).
 No requiere clave. Endpoint usado: `GET /stations/{codigo}/board-renfe`
 (códigos: Chamartín `17000`, Atocha `60000`).
 
-### Vuelos — [AeroDataBox](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) (RapidAPI)
+### Vuelos — [AeroDataBox](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) (RapidAPI), vía un proxy propio
 
-Requiere una clave gratuita propia (plan BASIC, ~600 peticiones/mes).
-Sin clave configurada, el panel de Barajas muestra datos de ejemplo con
+`index.html` no llama a AeroDataBox directamente ni pide ninguna clave a
+quien usa la app. Llama a un pequeño **Cloudflare Worker** (`worker/`)
+que:
+
+- Guarda la clave de AeroDataBox como secreto (`AERODATABOX_KEY`), nunca
+  en el código ni en el repositorio.
+- Calcula la ventana horaria en hora local de Madrid (Europe/Madrid),
+  evitando el desfase de zona horaria que da `Date.toISOString()`.
+- Cachea la respuesta ~3 minutos en el edge de Cloudflare, así que
+  aunque la app refresque cada 60 s, la clave gratuita (~600
+  peticiones/mes) no se agota aunque alguien deje la pestaña abierta.
+
+Sin el proxy disponible, el panel de Barajas cae a datos de ejemplo con
 un aviso visible de "modo demostración" — nunca oculta que son datos
 falsos.
 
-Para activarlo: abre la app → pestaña **Ajustes** → pega tu clave de
-RapidAPI → Guardar. La clave se guarda solo en el `localStorage` de tu
-navegador; nunca viaja a ningún servidor propio ni se sube al repositorio.
+Desplegar el proxy (una vez, con [wrangler](https://developers.cloudflare.com/workers/wrangler/)):
+
+```bash
+cd worker
+npx wrangler login
+npx wrangler secret put AERODATABOX_KEY   # pega tu clave cuando la pida
+npx wrangler deploy
+```
 
 ## Desarrollo local
 

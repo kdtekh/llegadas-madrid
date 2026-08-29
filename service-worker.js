@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'llegadas-madrid-v2';
+const CACHE_VERSION = 'llegadas-madrid-v3';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 
@@ -10,7 +10,7 @@ const SHELL_ASSETS = [
   './icons/icon-512.png',
 ];
 
-const API_HOSTS = ['radardetrenes.com', 'aerodatabox.p.rapidapi.com'];
+const API_HOSTS = ['radardetrenes.com', 'llegadas-madrid-proxy.kdtekh.workers.dev'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
