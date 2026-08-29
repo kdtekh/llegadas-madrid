@@ -83,6 +83,7 @@
     padding:16px 10px;border-bottom:1px solid var(--hairline);
   }
   .row.fav{background:rgba(242,169,0,0.06);}
+  .row.llegado{opacity:.5;}
   .row .time{font-family:'Space Mono',monospace;font-weight:700;font-size:21px;color:var(--flap);line-height:1.15;}
   .row .time small{display:block;font-size:11px;color:var(--ink-dim);font-weight:400;margin-top:2px;}
   .row .origin{font-size:16px;line-height:1.3;}
@@ -92,6 +93,7 @@
   .status.ok{color:var(--ok);}
   .status.warn{color:var(--warn);}
   .status.bad{color:var(--bad);}
+  .status.llegado{color:var(--ink-dim);}
   .row .star{background:none;border:none;font-size:22px;color:var(--hairline);cursor:pointer;padding:0;}
   .row .star.on{color:var(--flap);}
 
@@ -178,9 +180,10 @@ function TREN_ENDPOINT(codigo){
   return `https://radardetrenes.com/api/v1/stations/${codigo}/board-renfe`;
 }
 // Vuelos: proxy propio (Cloudflare Worker) que guarda la clave de
-// AeroDataBox del lado del servidor y cachea la respuesta ~3 min, para
-// que la app pueda refrescar cada 60s sin agotar la cuota gratuita ni
-// pedirle una clave a quien use la app.
+// AeroDataBox del lado del servidor y cachea la respuesta ~5 min en una
+// KV global (no por centro de datos), para que la app pueda refrescar
+// cada 60s sin agotar la cuota gratuita ni pedirle una clave a quien
+// use la app.
 const VUELO_PROXY_ENDPOINT = 'https://llegadas-madrid-proxy.kdtekh.workers.dev/arrivals';
 const REFRESH_MS = 60000;
 
@@ -188,6 +191,46 @@ const REFRESH_MS = 60000;
 // Persistencia con localStorage: esto es una PWA real servida desde un
 // dominio propio, no un artefacto de Claude.ai (donde no está disponible).
 const LS_KEY_FAVORITOS = 'llegadas-madrid:favoritos';
+// El panel en vivo de RadarDeTrenes solo muestra los próximos trenes (no
+// los ya llegados). Para poder mostrar "llegadas de la última media hora"
+// guardamos localmente lo que ya hemos visto y lo conservamos 30 min tras
+// su hora prevista, marcado como "llegado", aunque ya haya salido del panel.
+const HISTORY_WINDOW_MS = 30 * 60 * 1000;
+function historyKey(key){ return `llegadas-madrid:historial:${key}`; }
+function loadHistory(key){
+  try{
+    const raw = localStorage.getItem(historyKey(key));
+    return raw ? JSON.parse(raw) : {};
+  }catch(e){ return {}; }
+}
+function saveHistory(key, historial){
+  try{ localStorage.setItem(historyKey(key), JSON.stringify(historial)); }catch(e){}
+}
+function mergeConHistorial(key, vivos){
+  const now = Date.now();
+  const historial = loadHistory(key);
+  const vistosAhora = new Set();
+
+  vivos.forEach(r=>{
+    historial[r.id] = { ...r, llegado:false };
+    vistosAhora.add(r.id);
+  });
+
+  Object.keys(historial).forEach(id=>{
+    const item = historial[id];
+    if(now - item.plannedTimeMs > HISTORY_WINDOW_MS){
+      delete historial[id];
+      return;
+    }
+    if(!vistosAhora.has(id)){
+      if(item.plannedTimeMs <= now) item.llegado = true;
+      else delete historial[id]; // salió del panel antes de su hora: no especulamos
+    }
+  });
+
+  saveHistory(key, historial);
+  return Object.values(historial).sort((a,b)=> a.plannedTimeMs - b.plannedTimeMs);
+}
 
 let state = { tab:'chamartin', favoritos:{}, trainsDemo:false, flightsDemo:true };
 
@@ -238,9 +281,8 @@ async function fetchTrenes(key){
     const data = await res.json();
     const lista = data.arrivals || [];
     if(!lista.length) throw new Error('respuesta vacía');
-    lista.sort((a,b)=> a.plannedTime - b.plannedTime);
     state.trainsDemo = false;
-    return lista.map(normalizaTren);
+    return mergeConHistorial(key, lista.map(normalizaTren));
   }catch(e){
     state.trainsDemo = true;
     return demoTrenes(st.codigo);
@@ -252,6 +294,8 @@ function normalizaTren(x){
     : '--:--';
   const retraso = x.delayMinutes || 0;
   return {
+    id: `${x.trainCode}_${hora}`,
+    plannedTimeMs: x.plannedTime,
     hora,
     origen: x.originName || '—',
     num: x.trainCode || '',
@@ -259,6 +303,7 @@ function normalizaTren(x){
     estado: retraso > 5 ? 'warn' : 'ok',
     retraso,
     cancelado: false,
+    llegado: false,
   };
 }
 async function fetchVuelos(){
@@ -305,9 +350,15 @@ const view = document.getElementById('view');
 const titleMini = document.getElementById('stationTitleMini');
 
 function statusLabel(r){
+  if(r.llegado) return 'LLEGADO';
   if(r.cancelado) return 'CANCELADO';
   if(r.estado === 'warn') return `+${r.retraso||''} MIN`.trim();
   return 'EN HORA';
+}
+function statusClass(r){
+  if(r.llegado) return 'llegado';
+  if(r.cancelado) return 'bad';
+  return r.estado;
 }
 function favKeyOf(tab, r){ return tab+'|'+r.num+'|'+r.hora; }
 
@@ -337,12 +388,12 @@ function renderBoard(tab, nombre, rows, isDemo){
     const fk = favKeyOf(tab, r);
     const isFav = !!state.favoritos[fk];
     const div = document.createElement('div');
-    div.className = 'row' + (isFav ? ' fav' : '');
+    div.className = 'row' + (isFav ? ' fav' : '') + (r.llegado ? ' llegado' : '');
     div.innerHTML = `
       <div class="time mono">${r.hora}</div>
       <div class="origin">${r.origen}<span class="num">${r.num}</span></div>
       <div class="plat">${r.via}</div>
-      <div class="status ${r.estado}">${statusLabel(r)}</div>
+      <div class="status ${statusClass(r)}">${statusLabel(r)}</div>
       <button class="star ${isFav?'on':''}" aria-label="favorito">★</button>
     `;
     div.querySelector('.star').addEventListener('click', ()=>{

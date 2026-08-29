@@ -1,6 +1,10 @@
 const BARAJAS_ICAO = 'LEMD';
 const WINDOW_HOURS = 4;
-const CACHE_BUCKET_MINUTES = 3; // agrupa peticiones cercanas para no gastar cuota de AeroDataBox
+// Agrupa peticiones cercanas en un mismo "bucket" para no gastar cuota de
+// AeroDataBox. Se cachea en Workers KV (global de verdad) en vez de la
+// Cache API de Workers (que es por centro de datos: comprobado que
+// peticiones seguidas podían caer en colos distintos y fallar la caché).
+const CACHE_BUCKET_MINUTES = 5;
 const ALLOWED_ORIGINS = new Set([
   'https://kdtekh.github.io',
   'http://localhost:8791',
@@ -35,7 +39,9 @@ function madridWindow() {
   const toDate = new Date(fromDate.getTime() + WINDOW_HOURS * 3600 * 1000);
   const to = `${toDate.getFullYear()}-${pad2(toDate.getMonth() + 1)}-${pad2(toDate.getDate())}T${pad2(toDate.getHours())}:${pad2(toDate.getMinutes())}`;
 
-  return { from, to };
+  const bucketKey = `arrivals:${parts.year}${parts.month}${parts.day}${parts.hour}${pad2(roundedMinute)}`;
+
+  return { from, to, bucketKey };
 }
 
 export default {
@@ -51,16 +57,18 @@ export default {
       return new Response('Not found', { status: 404, headers: corsHeaders(origin) });
     }
 
-    const { from, to } = madridWindow();
-    const cacheKey = new Request(`https://cache.internal/arrivals?from=${from}&to=${to}`, request);
-    const cache = caches.default;
+    const { from, to, bucketKey } = madridWindow();
 
-    let response = await cache.match(cacheKey);
-    if (response) {
-      const cached = new Response(response.body, response);
-      Object.entries(corsHeaders(origin)).forEach(([k, v]) => cached.headers.set(k, v));
-      cached.headers.set('X-Cache', 'HIT');
-      return cached;
+    const cached = await env.ARRIVALS_CACHE.get(bucketKey);
+    if (cached) {
+      return new Response(cached, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Cache': 'HIT',
+          ...corsHeaders(origin),
+        },
+      });
     }
 
     const upstreamUrl = `https://aerodatabox.p.rapidapi.com/flights/airports/icao/${BARAJAS_ICAO}/${from}/${to}?direction=Arrival&withLeg=true&withCancelled=true&withCodeshared=true&withLocation=false`;
@@ -80,17 +88,19 @@ export default {
     }
 
     const data = await upstream.text();
-    response = new Response(data, {
+
+    // TTL con margen sobre la duración del bucket: si el reloj del cliente
+    // se desfasa unos segundos del bucket calculado aquí, sigue sirviendo
+    // desde KV en vez de fallar la lectura por haber expirado justo antes.
+    ctx.waitUntil(env.ARRIVALS_CACHE.put(bucketKey, data, { expirationTtl: CACHE_BUCKET_MINUTES * 60 + 60 }));
+
+    return new Response(data, {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${CACHE_BUCKET_MINUTES * 60}`,
         'X-Cache': 'MISS',
         ...corsHeaders(origin),
       },
     });
-
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-    return response;
   },
 };

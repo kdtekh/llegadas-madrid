@@ -4,3 +4,7 @@ compatibility_date = "2026-08-29"
 
 [observability]
 enabled = true
+
+[[kv_namespaces]]
+binding = "ARRIVALS_CACHE"
+id = "3f8489a519aa470791d6e725e71ec821"

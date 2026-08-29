@@ -9,8 +9,11 @@ necesita consultar "¿a qué hora llega?" sin abrir tres apps distintas.
 ## Características
 
 - Tres paneles (Chamartín, Atocha, Barajas) con horario previsto, origen,
-  vía/terminal y estado (en hora / retraso en minutos / cancelado).
-- Datos en vivo, con auto-refresco cada 60 s.
+  vía/terminal y estado (en hora / retraso en minutos / cancelado /
+  llegado).
+- Datos en vivo, con auto-refresco cada 60 s. En Chamartín y Atocha,
+  además de los próximos trenes (lo único que da el panel oficial),
+  conserva localmente los que ya han llegado en los últimos 30 minutos.
 - Buscador por número de tren/vuelo.
 - Favoritos (⭐), persistentes entre sesiones.
 - Instalable como app ("Añadir a pantalla de inicio") gracias a un
@@ -36,9 +39,11 @@ que:
   en el código ni en el repositorio.
 - Calcula la ventana horaria en hora local de Madrid (Europe/Madrid),
   evitando el desfase de zona horaria que da `Date.toISOString()`.
-- Cachea la respuesta ~3 minutos en el edge de Cloudflare, así que
-  aunque la app refresque cada 60 s, la clave gratuita (~600
-  peticiones/mes) no se agota aunque alguien deje la pestaña abierta.
+- Cachea la respuesta ~5 minutos en Workers KV (caché **global**, no por
+  centro de datos — con la Cache API normal de Workers, peticiones
+  seguidas podían caer en colos distintos y no acertar), así que aunque
+  la app refresque cada 60 s, la clave gratuita (~600 peticiones/mes) no
+  se agota aunque alguien deje la pestaña abierta.
 
 Sin el proxy disponible, el panel de Barajas cae a datos de ejemplo con
 un aviso visible de "modo demostración" — nunca oculta que son datos
@@ -49,7 +54,8 @@ Desplegar el proxy (una vez, con [wrangler](https://developers.cloudflare.com/wo
 ```bash
 cd worker
 npx wrangler login
-npx wrangler secret put AERODATABOX_KEY   # pega tu clave cuando la pida
+npx wrangler kv namespace create ARRIVALS_CACHE   # una vez; copia el id a wrangler.toml
+npx wrangler secret put AERODATABOX_KEY           # pega tu clave cuando la pida
 npx wrangler deploy
 ```
 
