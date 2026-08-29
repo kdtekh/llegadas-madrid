@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'llegadas-madrid-v1';
+const CACHE_VERSION = 'llegadas-madrid-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 

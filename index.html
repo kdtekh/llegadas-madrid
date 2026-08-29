@@ -270,12 +270,18 @@ function normalizaTren(x){
     cancelado: false,
   };
 }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function toLocalISOMinute(d){
+  // AeroDataBox espera fromLocal/toLocal en hora LOCAL del aeropuerto (Madrid),
+  // no en UTC — toISOString() da UTC y desplaza la ventana ~2h (offset CET/CEST).
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 async function fetchVuelos(){
   if(!state.flightKey){ state.flightsDemo = true; return demoVuelos(); }
   try{
     const now = new Date();
-    const from = now.toISOString().slice(0,16);
-    const to = new Date(now.getTime()+4*3600*1000).toISOString().slice(0,16);
+    const from = toLocalISOMinute(now);
+    const to = toLocalISOMinute(new Date(now.getTime()+4*3600*1000));
     const res = await fetch(VUELO_ENDPOINT(BARAJAS_ICAO, from, to), {
       headers:{
         'X-RapidAPI-Key': state.flightKey,
@@ -286,6 +292,11 @@ async function fetchVuelos(){
     const data = await res.json();
     const lista = data.arrivals || [];
     if(!lista.length) throw new Error('vacío');
+    lista.sort((a,b)=>{
+      const ta = a.arrival?.scheduledTime?.local?.replace(' ','T');
+      const tb = b.arrival?.scheduledTime?.local?.replace(' ','T');
+      return new Date(ta) - new Date(tb);
+    });
     state.flightsDemo = false;
     return lista.map(normalizaVuelo);
   }catch(e){
