@@ -69,23 +69,28 @@ construida, probada y funcionando con datos en vivo.
 
 ## 4. Lo que le pido a Claude Code
 
-1. Crea un repo/carpeta de proyecto a partir del código de la sección 5.
-2. **Resuelve la persistencia fuera del artefacto**: `window.storage` no
-   existe en un navegador normal. Sustitúyelo por `localStorage` (esto es
-   una PWA de verdad, no un artefacto de Claude.ai, así que no aplica la
-   restricción de no usar localStorage) para favoritos y la clave de
-   AeroDataBox.
-3. Añade un `manifest.json` real y un service worker mínimo (cache-first
-   para el shell, network-first para las llamadas a la API) para que la
-   PWA sea instalable de forma robusta y funcione offline con la última
-   foto de datos.
-4. Verifica en vivo el endpoint de AeroDataBox en cuanto tengas una clave
-   de prueba; ajusta `normalizaVuelo()` si el esquema real difiere.
-5. Sirve la app en algún hosting estático (GitHub Pages, Netlify, Vercel,
-   Cloudflare Pages) para tener una URL fija que tu padre pueda añadir a
-   la pantalla de inicio sin depender de un artefacto de chat.
-6. Deja preparado (no implementado todavía salvo que se pida) el resto del
-   roadmap del documento original — sección 6 más abajo.
+1. ~~Crea un repo/carpeta de proyecto a partir del código de la sección 5.~~
+   **Hecho** (2026-08-29) — repo git local en `~/proyecto-local (ruta omitida)`,
+   commit `cdfd662`.
+2. ~~**Resuelve la persistencia fuera del artefacto**~~ **Hecho** —
+   `index.html` usa `localStorage` (`llegadas-madrid:favoritos`,
+   `llegadas-madrid:flight-api-key`) en vez de `window.storage`. Probado
+   en navegador real: favoritos y clave sobreviven a un reload.
+3. ~~Añade un `manifest.json` real y un service worker mínimo~~ **Hecho** —
+   `manifest.json` con iconos propios (`icons/icon-192.png`,
+   `icons/icon-512.png`, generados desde `icons/icon.svg`) y
+   `service-worker.js` (cache-first para shell/fuentes, network-first con
+   fallback a caché para RadarDeTrenes y AeroDataBox). Verificado:
+   `caches.keys()` muestra `llegadas-madrid-v1-shell` y `-api` pobladas
+   tras cargar la app.
+4. **Pendiente** — Verificar en vivo el endpoint de AeroDataBox en cuanto
+   haya una clave de prueba real; ajustar `normalizaVuelo()` si el esquema
+   difiere. Con una clave inválida el fallback a modo demo funciona
+   correctamente (probado).
+5. **Pendiente, a petición del usuario** — Por ahora se deja el código
+   listo sin desplegar; el usuario decidirá cuándo y dónde (GitHub Pages,
+   Netlify, Vercel, Cloudflare Pages) para tener una URL fija.
+6. Resto del roadmap (sección 6) sigue sin implementar, tal como se pidió.
 
 No hace falta rehacer el diseño visual ni volver a investigar las APIs:
 ambas cosas ya están resueltas y probadas.
