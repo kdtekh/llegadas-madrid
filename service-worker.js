@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'llegadas-madrid-v8';
+const CACHE_VERSION = 'llegadas-madrid-v9';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 
@@ -13,9 +13,17 @@ const SHELL_ASSETS = [
 const API_HOSTS = ['radardetrenes.com', 'llegadas-madrid-proxy.kdtekh.workers.dev'];
 
 self.addEventListener('install', (event) => {
+  // fetch con {cache:'reload'} en vez de cache.addAll(): GitHub Pages sirve
+  // index.html con Cache-Control: max-age=600, y cache.addAll respeta esa
+  // caché HTTP del navegador — al instalar una versión nueva del shell,
+  // podía quedarse con una copia de index.html ya desactualizada.
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_ASSETS))
+      .then((cache) => Promise.all(
+        SHELL_ASSETS.map((url) =>
+          fetch(url, { cache: 'reload' }).then((response) => cache.put(url, response))
+        )
+      ))
       .then(() => self.skipWaiting())
   );
 });
